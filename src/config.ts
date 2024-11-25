@@ -22,5 +22,5 @@ export interface ButtonConfig {
 export function loadConfig(): Config {
     const mainDir = path.dirname(require.main?.filename || process.argv[1])
 
-    return require(path.join(mainDir, "config.ts")) as Config
+    return require(path.join(mainDir, "ha-multi-click.config.ts")) as Config
 }

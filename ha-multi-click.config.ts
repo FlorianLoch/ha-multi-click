@@ -1,3 +1,7 @@
+if (process.env.HA_TOKEN === undefined) {
+    throw new Error("HA_TOKEN environment variable is not set")
+}
+
 module.exports = {
     homeAssistantURL: "http://192.168.178.4:8123",
     longLivedToken: process.env.HA_TOKEN,

@@ -1,7 +1,14 @@
 import {createConnection, createLongLivedTokenAuth, subscribeEntities} from "home-assistant-js-websocket";
-import {loadConfig} from "./src/config.ts";
+import {type Config, loadConfig} from "./src/config.ts";
 
-const cfg = loadConfig()
+let cfg: Config
+try {
+    cfg = loadConfig()
+} catch (e: any) {
+    console.error(`Failed to load config file: ${e.toString()}`)
+
+    process.exit(1)
+}
 
 const connection = await createConnection({
     auth: createLongLivedTokenAuth(
@@ -55,3 +62,5 @@ cfg.buttons.forEach(async button => {
         }
     })
 })
+
+// TODO: Handle graceful shutdown, unsubscribe from all triggers
