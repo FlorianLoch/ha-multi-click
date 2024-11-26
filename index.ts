@@ -2,7 +2,11 @@ import {
   createConnection,
   createLongLivedTokenAuth,
 } from "home-assistant-js-websocket";
-import { type Config, loadConfig } from "./src/config.ts";
+import {
+  type Config,
+  loadConfig,
+  type ObjectWithStringKeys,
+} from "./src/config.ts";
 
 let cfg: Config;
 try {
@@ -32,16 +36,19 @@ cfg.buttons.forEach(async (button) => {
   let count = 0;
   let lastChange = new Date();
 
-  const maxClicks = button.on.actions.length;
-
   unsubscribeFns.push(
     await connection.subscribeMessage(
-      (result) => {
+      (_) => {
         cfg.verbose && console.log(`Received 'on' for '${button.name}'`);
 
-        const action = button.on.actions[count];
+        const onActions =
+          typeof button.on.actions === "function"
+            ? button.on.actions()
+            : button.on.actions;
+        
+        const action = onActions[count];
 
-        count = (count + 1) % maxClicks;
+        count = (count + 1) % onActions.length;
         lastChange = new Date();
 
         sendAction(action);

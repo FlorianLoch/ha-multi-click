@@ -7,15 +7,17 @@ export interface Config {
   verbose: false;
 }
 
+export type ObjectWithStringKeys = { [key: string]: any };
+
 export interface ButtonConfig {
   name?: string;
   off: {
-    trigger: { [key: string]: any };
-    action: { [key: string]: any };
+    trigger: ObjectWithStringKeys;
+    action: ObjectWithStringKeys;
   };
   on: {
-    trigger: { [key: string]: any };
-    actions: Array<{ [key: string]: any }>;
+    trigger: ObjectWithStringKeys;
+    actions: Array<ObjectWithStringKeys> | (() => Array<ObjectWithStringKeys>);
   };
 }
 
