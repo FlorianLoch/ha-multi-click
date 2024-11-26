@@ -1,4 +1,4 @@
-import {createConnection, createLongLivedTokenAuth, subscribeEntities} from "home-assistant-js-websocket";
+import {createConnection, createLongLivedTokenAuth} from "home-assistant-js-websocket";
 import {type Config, loadConfig} from "./src/config.ts";
 
 let cfg: Config
@@ -26,13 +26,15 @@ const sendAction = (action: any) => {
 
 console.log(`Connected to Home Assistant at ${cfg.homeAssistantURL}`)
 
+const unsubscribeFns = new Array<() => Promise<void>>
+
 cfg.buttons.forEach(async button => {
     let count = 0
     let lastChange = new Date()
 
     const maxClicks = button.on.actions.length
 
-    await connection.subscribeMessage(result => {
+    unsubscribeFns.push(await connection.subscribeMessage(result => {
         cfg.verbose && console.log(`Received 'on' for '${button.name}'`)
 
         const action = button.on.actions[count]
@@ -46,9 +48,9 @@ cfg.buttons.forEach(async button => {
         trigger: {
             ...button.on.trigger
         }
-    })
+    }))
 
-    await connection.subscribeMessage(result => {
+    unsubscribeFns.push(await connection.subscribeMessage(result => {
         cfg.verbose && console.log(`Received 'off' for '${button.name}'`)
 
         count = 0
@@ -60,7 +62,20 @@ cfg.buttons.forEach(async button => {
         trigger: {
             ...button.off.trigger
         }
-    })
+    }))
 })
 
-// TODO: Handle graceful shutdown, unsubscribe from all triggers
+const shutdown = async () => {
+    console.log("Shutting down...")
+
+    for (const unsubscribe of unsubscribeFns) {
+        await unsubscribe()
+    }
+
+    console.log("Unsubscribed from all triggers. Exiting...")
+
+    connection.close()
+}
+
+process.on("SIGINT", shutdown)
+process.on("SIGTERM", shutdown)
