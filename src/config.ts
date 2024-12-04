@@ -34,7 +34,7 @@ export async function monitorConfig(onChange: (c: Config | Error) => Promise<voi
     // After having unwatched the file, we can safely call the onChange function.
     // And once that is done, we can watch the file again.
     if (firstRun) {
-      console.log("(Loading config file...");
+      console.log("Loading config file...");
 
       firstRun = false;
     } else {

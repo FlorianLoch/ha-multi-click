@@ -70,6 +70,7 @@ async function up(cfg: Config): Promise<() => Promise<void>> {
               ...button.on.trigger,
             },
           },
+          { resubscribe: true },
         ),
       );
 
@@ -89,10 +90,28 @@ async function up(cfg: Config): Promise<() => Promise<void>> {
               ...button.off.trigger,
             },
           },
+          { resubscribe: true },
         ),
       );
     }),
   );
+
+  connection.addEventListener("ready", () => {
+    // Will not be called for the initial establishing of a connection
+    console.log(`Reconnected to Home Assistant at ${cfg.homeAssistantURL}`);
+  });
+
+  connection.addEventListener("disconnected", () => {
+    console.log("Disconnected from Home Assistant. Reconnecting...");
+  });
+
+  connection.addEventListener("reconnect-error", (err) => {
+    console.error(`Failed to reconnect to Home Assistant: ${err}`);
+    console.log("Shutting down...");
+
+    // We delegate the task of restarting to the service manager, i.e. systemd, docker etc.
+    down()
+  });
 
   return async () => {
     console.log("Shutting down...");
