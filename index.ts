@@ -26,7 +26,7 @@ monitorConfig(async (cfg: Config | Error) => {
 process.on("SIGINT", down);
 process.on("SIGTERM", down);
 
-async function connect(cfg: Config): Promise<Connection> {
+async function connect(cfg: Config, initialConnect: boolean): Promise<Connection> {
   async function waitForConnection() {
     try {
       console.log("Connecting to Home Assistant...");
@@ -49,7 +49,7 @@ async function connect(cfg: Config): Promise<Connection> {
     }
   }
 
-  async function waitForEventBusToBeReady(connection: Connection) {
+  async function waitForEventBusToBeReady(connection: Connection, initialConnect: boolean) {
     return new Promise<void>(async (resolve) => {
       let ready = false;
 
@@ -59,7 +59,12 @@ async function connect(cfg: Config): Promise<Connection> {
 
           console.log("Test event triggered; event bus is ready!");
 
-          resolve();
+          // To be very sure, we wait another 30 seconds when reconnecting.
+          if (initialConnect) {
+            resolve();
+          } else {
+            setTimeout(resolve, 30_000);
+          }
         },
         {
           type: "subscribe_trigger",
@@ -82,7 +87,7 @@ async function connect(cfg: Config): Promise<Connection> {
           "Test event did not fire... Waiting for event bus to become ready...",
         );
 
-        resolve(waitForEventBusToBeReady(connection));
+        resolve(waitForEventBusToBeReady(connection, initialConnect));
       }, 2000);
 
       // As documented at https://developers.home-assistant.io/docs/api/websocket/#fire-an-event
@@ -95,7 +100,7 @@ async function connect(cfg: Config): Promise<Connection> {
 
   const connection = await waitForConnection();
 
-  await waitForEventBusToBeReady(connection);
+  await waitForEventBusToBeReady(connection, initialConnect);
 
   return connection;
 }
@@ -103,10 +108,10 @@ async function connect(cfg: Config): Promise<Connection> {
 async function up(cfg: Config): Promise<() => Promise<void>> {
   let teardownFns = new Array<() => Promise<void>>();
 
-  const _up = async () => {
+  const _up = async (initialConnect: boolean) => {
     teardownFns = [];
 
-    const connection = await connect(cfg);
+    const connection = await connect(cfg, initialConnect);
 
     const sendAction = (action: any) => {
       connection.sendMessage({
@@ -184,7 +189,7 @@ async function up(cfg: Config): Promise<() => Promise<void>> {
       connection.close();
 
       setImmediate(() => {
-        _up();
+        _up(false);
       });
     });
 
@@ -199,7 +204,7 @@ async function up(cfg: Config): Promise<() => Promise<void>> {
     teardownFns.push(() => Promise.resolve(connection.close()));
   };
 
-  await _up();
+  await _up(true);
 
   return async () => {
     console.log("Shutting down...");
@@ -220,18 +225,4 @@ async function down() {
   }
 
   process.exit(0);
-}
-
-function once<T extends (...args: any[]) => any>(fn: T): T {
-  let called = false;
-
-  return function (this: any, ...args: any[]) {
-    if (called) {
-      return;
-    }
-
-    called = true;
-
-    return fn.apply(this, args);
-  } as T;
 }
