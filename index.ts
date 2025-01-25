@@ -26,7 +26,21 @@ monitorConfig(async (cfg: Config | Error) => {
 process.on("SIGINT", down);
 process.on("SIGTERM", down);
 
-async function connect(cfg: Config, initialConnect: boolean): Promise<Connection> {
+// Automatically reload/reconnect every 10 minutes to work-around of possible registering to the event bus before it's
+// fully ready.
+// In case HA restarts, and we reconnect before all triggers are known to HA, we can register for them without error -
+// but they will never fire.
+setInterval(
+  () => {
+    process.kill(process.pid, "SIGHUP");
+  },
+  60 * 1000 * 10,
+);
+
+async function connect(
+  cfg: Config,
+  initialConnect: boolean,
+): Promise<Connection> {
   async function waitForConnection() {
     try {
       console.log("Connecting to Home Assistant...");
@@ -49,7 +63,10 @@ async function connect(cfg: Config, initialConnect: boolean): Promise<Connection
     }
   }
 
-  async function waitForEventBusToBeReady(connection: Connection, initialConnect: boolean) {
+  async function waitForEventBusToBeReady(
+    connection: Connection,
+    initialConnect: boolean,
+  ) {
     return new Promise<void>(async (resolve) => {
       let ready = false;
 

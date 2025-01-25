@@ -34,6 +34,12 @@ export async function monitorConfig(
 
   let firstRun = true;
 
+  const handleSighup = () => {
+    console.log("Received SIGHUP signal...");
+
+    loadFn();
+  };
+
   const loadFn = async () => {
     // By wrapping the loadFn with a "once" we prevent it from being called multiple times before unwatching the file.
     // After having unwatched the file, we can safely call the onChange function.
@@ -44,6 +50,7 @@ export async function monitorConfig(
       firstRun = false;
     } else {
       unwatchFile(filePath);
+      process.off("SIGHUP", handleSighup);
 
       console.log("Reloading config file...");
     }
@@ -62,6 +69,9 @@ export async function monitorConfig(
     setImmediate(() => {
       watchFile(filePath, once(loadFn));
     });
+
+    // Additionally, we allow restarting via SIGHUP
+    process.once("SIGHUP", handleSighup);
   };
 
   // We also want to load the config file initially.
@@ -74,9 +84,9 @@ async function evalConfig(filePath: string): Promise<Config> {
       sunIsUp,
     }, // Inject helpers
     process: {
-      env: process.env
+      env: process.env,
     }, // Grant access to environment variables
-    console,    // Inject the console object
+    console, // Inject the console object
     module: { exports: {} }, // Simulate CommonJS
     exports: {},
   });

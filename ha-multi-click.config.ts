@@ -1,3 +1,8 @@
+// Global helpers defined in the execution context of the config file
+declare global {
+  let sunIsUp: () => boolean;
+}
+
 if (process.env.HA_TOKEN === undefined) {
   throw new Error("HA_TOKEN environment variable is not set");
 }
