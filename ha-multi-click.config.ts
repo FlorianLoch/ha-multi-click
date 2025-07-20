@@ -55,7 +55,7 @@ module.exports = {
 };
 
 function hueTrigger(state: "on" | "off", deviceId: string) {
-  return trigger(state + "-press", deviceId);
+  return trigger(state + "_press", deviceId);
 }
 
 function rodretTrigger(state: "on" | "off", deviceId: string) {
