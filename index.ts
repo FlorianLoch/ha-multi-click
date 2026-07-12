@@ -2,31 +2,13 @@ import {
   Connection,
   createConnection,
   createLongLivedTokenAuth,
-  ERR_CANNOT_CONNECT,
-  ERR_CONNECTION_LOST,
-  ERR_HASS_HOST_REQUIRED,
-  ERR_INVALID_AUTH,
-  ERR_INVALID_HTTPS_TO_HTTP,
 } from "home-assistant-js-websocket";
 import { type Config, monitorConfig } from "./src/config.ts";
-
-// home-assistant-js-websocket throws plain numeric error codes, not Errors.
-function formatError(e: any): string {
-  switch (e) {
-    case ERR_CANNOT_CONNECT:
-      return "cannot connect";
-    case ERR_INVALID_AUTH:
-      return "invalid auth";
-    case ERR_CONNECTION_LOST:
-      return "connection lost";
-    case ERR_HASS_HOST_REQUIRED:
-      return "Home Assistant host required";
-    case ERR_INVALID_HTTPS_TO_HTTP:
-      return "invalid HTTPS to HTTP connection";
-    default:
-      return `${e?.message ?? e}`;
-  }
-}
+import {
+  type DeviceRegistryEntry,
+  formatError,
+  setDeviceRegistry,
+} from "./src/helpers.ts";
 
 let teardownFn: null | (() => Promise<void>) = null;
 
@@ -193,8 +175,22 @@ async function up(cfg: Config): Promise<() => Promise<void>> {
 
     console.log(`Connected to Home Assistant at ${cfg.homeAssistantURL}`);
 
+    // Make connection-dependent helpers (lookupDeviceId) ready before invoking
+    // buttonsConfigFn.
+    const deviceRegistry = await connection.sendMessagePromise<
+      Array<DeviceRegistryEntry>
+    >({
+      type: "config/device_registry/list",
+    });
+
+    cfg.verbose && console.log("Fetched device registry", deviceRegistry);
+
+    setDeviceRegistry(deviceRegistry);
+
+    const buttons = cfg.buttonsConfigFn();
+
     await Promise.all(
-      cfg.buttons.map(async (button) => {
+      buttons.map(async (button) => {
         let count = 0;
         let lastChange = Date.now();
 

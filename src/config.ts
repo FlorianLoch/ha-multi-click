@@ -1,13 +1,16 @@
 import { dirname, join } from "node:path";
 import { watchFile, unwatchFile } from "node:fs";
 import { createContext, runInNewContext } from "node:vm";
-import { readFile } from "node:fs/promises";
 import { build } from "bun";
+import { configFileHelpers } from "./helpers.ts";
 
 export interface Config {
   homeAssistantURL: string;
   longLivedToken: string;
-  buttons: Array<ButtonConfig>;
+  // Invoked every time a connection to Home Assistant has been
+  // established. Helpers that depend on a connection being ready (e.g. lookupDeviceId)
+  // are only usable inside this function.
+  buttonsConfigFn: () => Array<ButtonConfig>;
   verbose: boolean;
 }
 
@@ -91,10 +94,8 @@ export async function monitorConfig(
 
 async function evalConfig(filePath: string): Promise<Config> {
   const context = createContext({
-    sunIsUp, // Inject helpers as globals (matching `declare global` in config files)
-    helpers: {
-      sunIsUp,
-    }, // Also keep them available under `helpers` for backwards compatibility
+    ...configFileHelpers, // Inject helpers as globals (matching `declare global` in config files)
+    helpers: configFileHelpers, // Also keep them available under `helpers` for backwards compatibility
     process: {
       env: process.env,
     }, // Grant access to environment variables
@@ -129,18 +130,4 @@ function once(cb: () => Promise<void>) {
 
     await cb();
   };
-}
-
-function sunIsUp() {
-  // TODO: Very simple implementation; should be replaced with a proper calculation.
-  const now = new Date();
-  const sunrise = new Date();
-  const sunset = new Date();
-
-  sunrise.setHours(6);
-  sunrise.setMinutes(0);
-  sunset.setHours(20);
-  sunset.setMinutes(0);
-
-  return now >= sunrise && now < sunset;
 }

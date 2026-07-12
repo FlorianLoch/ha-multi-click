@@ -1,6 +1,8 @@
 // Global helpers defined in the execution context of the config file
 declare global {
   let sunIsUp: () => boolean;
+  // its internal device id via the device registry.
+  let lookupDeviceId: (deviceName: string) => string;
 }
 
 if (process.env.HA_TOKEN === undefined) {
@@ -10,7 +12,7 @@ if (process.env.HA_TOKEN === undefined) {
 module.exports = {
   homeAssistantURL: "http://192.168.178.4:8123",
   longLivedToken: process.env.HA_TOKEN,
-  buttons: [
+  buttonsConfigFn: () => [
     {
       name: "Living Room Hue Dimmer",
       off: {

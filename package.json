@@ -4,6 +4,7 @@
   "module": "index.ts",
   "scripts": {
     "start": "bun run index.ts",
+    "test": "bun test",
     "format": "prettier --write ."
   },
   "type": "module",
