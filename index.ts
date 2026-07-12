@@ -2,8 +2,31 @@ import {
   Connection,
   createConnection,
   createLongLivedTokenAuth,
+  ERR_CANNOT_CONNECT,
+  ERR_CONNECTION_LOST,
+  ERR_HASS_HOST_REQUIRED,
+  ERR_INVALID_AUTH,
+  ERR_INVALID_HTTPS_TO_HTTP,
 } from "home-assistant-js-websocket";
 import { type Config, monitorConfig } from "./src/config.ts";
+
+// home-assistant-js-websocket throws plain numeric error codes, not Errors.
+function formatError(e: any): string {
+  switch (e) {
+    case ERR_CANNOT_CONNECT:
+      return "cannot connect";
+    case ERR_INVALID_AUTH:
+      return "invalid auth";
+    case ERR_CONNECTION_LOST:
+      return "connection lost";
+    case ERR_HASS_HOST_REQUIRED:
+      return "Home Assistant host required";
+    case ERR_INVALID_HTTPS_TO_HTTP:
+      return "invalid HTTPS to HTTP connection";
+    default:
+      return `${e?.message ?? e}`;
+  }
+}
 
 let teardownFn: null | (() => Promise<void>) = null;
 
@@ -37,98 +60,129 @@ setInterval(
   60 * 1000 * 10,
 );
 
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+// Fires a test event and waits up to 2 seconds for it to come back through a
+// trigger subscription. Errors (e.g. the connection dropping) are propagated
+// to the caller instead of being swallowed.
+async function fireTestEvent(connection: Connection): Promise<boolean> {
+  let ready: (value: boolean) => void;
+  const readyPromise = new Promise<boolean>((resolve) => {
+    ready = resolve;
+  });
+
+  const unsubscribeFn = await connection.subscribeMessage(
+    () => ready(true),
+    {
+      type: "subscribe_trigger",
+      trigger: {
+        trigger: "event",
+        event_type: "ha-multi-click-test-event",
+      },
+    },
+    { resubscribe: false },
+  );
+
+  const timeout = setTimeout(() => ready(false), 2000);
+
+  try {
+    // As documented at https://developers.home-assistant.io/docs/api/websocket/#fire-an-event
+    connection.sendMessage({
+      type: "fire_event",
+      event_type: "ha-multi-click-test-event",
+    });
+
+    return await readyPromise;
+  } finally {
+    clearTimeout(timeout);
+
+    try {
+      await unsubscribeFn();
+    } catch {
+      // The connection might already be gone; nothing left to unsubscribe from.
+    }
+  }
+}
+
+async function waitForEventBusToBeReady(
+  connection: Connection,
+  initialConnect: boolean,
+) {
+  while (!(await fireTestEvent(connection))) {
+    console.log(
+      "Test event did not fire... Waiting for event bus to become ready...",
+    );
+  }
+
+  console.log("Test event triggered; event bus is ready!");
+
+  // To be very sure, we wait another 30 seconds when reconnecting.
+  if (!initialConnect) {
+    await sleep(30_000);
+  }
+}
+
 async function connect(
   cfg: Config,
   initialConnect: boolean,
 ): Promise<Connection> {
-  async function waitForConnection() {
+  while (true) {
+    let connection: Connection;
+
     try {
       console.log("Connecting to Home Assistant...");
 
-      return await createConnection({
+      connection = await createConnection({
         auth: createLongLivedTokenAuth(
           cfg.homeAssistantURL,
           cfg.longLivedToken,
         ),
       });
     } catch (e: any) {
-      console.error(`Failed to connect to Home Assistant: ${e.message}`);
+      console.error(`Failed to connect to Home Assistant: ${formatError(e)}`);
       console.log("Retrying in 5 seconds...");
 
-      return new Promise<Connection>((resolve) =>
-        setTimeout(() => {
-          resolve(waitForConnection());
-        }, 5000),
+      await sleep(5000);
+
+      continue;
+    }
+
+    try {
+      await waitForEventBusToBeReady(connection, initialConnect);
+
+      return connection;
+    } catch (e: any) {
+      console.error(
+        `Connection lost while waiting for the event bus: ${formatError(e)}`,
       );
+      console.log("Retrying in 5 seconds...");
+
+      connection.close();
+
+      await sleep(5000);
     }
   }
-
-  async function waitForEventBusToBeReady(
-    connection: Connection,
-    initialConnect: boolean,
-  ) {
-    return new Promise<void>(async (resolve) => {
-      let ready = false;
-
-      const unsubscribeFn = await connection.subscribeMessage(
-        () => {
-          ready = true;
-
-          console.log("Test event triggered; event bus is ready!");
-
-          // To be very sure, we wait another 30 seconds when reconnecting.
-          if (initialConnect) {
-            resolve();
-          } else {
-            setTimeout(resolve, 30_000);
-          }
-        },
-        {
-          type: "subscribe_trigger",
-          trigger: {
-            trigger: "event",
-            event_type: "ha-multi-click-test-event",
-          },
-        },
-        { resubscribe: false },
-      );
-
-      setTimeout(() => {
-        unsubscribeFn();
-
-        if (ready) {
-          return;
-        }
-
-        console.log(
-          "Test event did not fire... Waiting for event bus to become ready...",
-        );
-
-        resolve(waitForEventBusToBeReady(connection, initialConnect));
-      }, 2000);
-
-      // As documented at https://developers.home-assistant.io/docs/api/websocket/#fire-an-event
-      connection.sendMessage({
-        type: "fire_event",
-        event_type: "ha-multi-click-test-event",
-      });
-    });
-  }
-
-  const connection = await waitForConnection();
-
-  await waitForEventBusToBeReady(connection, initialConnect);
-
-  return connection;
 }
 
 async function up(cfg: Config): Promise<() => Promise<void>> {
   let teardownFns = new Array<() => Promise<void>>();
+  // Set once this setup has been torn down (e.g. after a config reload). An
+  // in-flight reconnect checks it so it does not leave behind a zombie
+  // connection whose subscriptions nothing ever tears down.
+  let stopped = false;
 
   const _up = async (initialConnect: boolean) => {
     teardownFns = [];
 
     const connection = await connect(cfg, initialConnect);
+
+    if (stopped) {
+      connection.close();
+
+      return;
+    }
 
     const sendAction = (action: any) => {
       connection.sendMessage({
@@ -142,7 +196,7 @@ async function up(cfg: Config): Promise<() => Promise<void>> {
     await Promise.all(
       cfg.buttons.map(async (button) => {
         let count = 0;
-        let lastChange = new Date();
+        let lastChange = Date.now();
 
         teardownFns.push(
           await connection.subscribeMessage(
@@ -154,12 +208,21 @@ async function up(cfg: Config): Promise<() => Promise<void>> {
                   ? button.on.actions()
                   : button.on.actions;
 
+              // Optionally restart the cycle when the last press is too long ago.
+              if (
+                button.on.resetCountAfterSeconds !== undefined &&
+                Date.now() - lastChange >
+                  button.on.resetCountAfterSeconds * 1000
+              ) {
+                count = 0;
+              }
+
               // We need this safeguard because the length of the actions array might have changed since the
               // last iteration and count could be out of bounds.
               const action = onActions[Math.min(count, onActions.length - 1)];
 
               count = (count + 1) % onActions.length;
-              lastChange = new Date();
+              lastChange = Date.now();
 
               sendAction(action);
             },
@@ -179,7 +242,7 @@ async function up(cfg: Config): Promise<() => Promise<void>> {
               cfg.verbose && console.log(`Received 'off' for '${button.name}'`);
 
               count = 0;
-              lastChange = new Date();
+              lastChange = Date.now();
 
               sendAction(button.off.action);
             },
@@ -195,30 +258,35 @@ async function up(cfg: Config): Promise<() => Promise<void>> {
       }),
     );
 
-    connection.addEventListener("ready", () => {
-      // Will not be called for the initial establishing of a connection
-      console.log(`Reconnected to Home Assistant at ${cfg.homeAssistantURL}`);
-    });
-
+    // We close the connection on "disconnected" and reconnect ourselves, so the
+    // library's built-in reconnect (and its "ready"/"reconnect-error" events)
+    // never runs.
     connection.addEventListener("disconnected", () => {
       console.log("Disconnected from Home Assistant. Reconnecting...");
 
       connection.close();
 
       setImmediate(() => {
-        _up(false);
+        if (stopped) {
+          return;
+        }
+
+        _up(false).catch((err: any) => {
+          console.error(`Failed to reconnect to Home Assistant: ${err}`);
+
+          // We delegate the task of restarting to the service manager, i.e. systemd, docker etc.
+          process.exit(1);
+        });
       });
     });
 
-    connection.addEventListener("reconnect-error", (err) => {
-      console.error(`Failed to reconnect to Home Assistant: ${err}`);
-      console.log("Shutting down...");
-
-      // We delegate the task of restarting to the service manager, i.e. systemd, docker etc.
-      down();
-    });
-
     teardownFns.push(() => Promise.resolve(connection.close()));
+
+    // A teardown might have run while we were connecting/subscribing; make sure
+    // we do not leave a zombie setup behind.
+    if (stopped) {
+      await runTeardownFns(teardownFns);
+    }
   };
 
   await _up(true);
@@ -226,14 +294,25 @@ async function up(cfg: Config): Promise<() => Promise<void>> {
   return async () => {
     console.log("Shutting down...");
 
-    for (const teardownFn of teardownFns) {
-      await teardownFn();
-    }
+    stopped = true;
+
+    await runTeardownFns(teardownFns);
 
     console.log(
       "Called all teardown functions; unsubscribed from all triggers.",
     );
   };
+}
+
+async function runTeardownFns(teardownFns: Array<() => Promise<void>>) {
+  for (const teardownFn of teardownFns) {
+    try {
+      await teardownFn();
+    } catch (e: any) {
+      // Unsubscribing can fail if the connection is already gone; that is fine.
+      console.error(`Error during teardown (ignored): ${e.message ?? e}`);
+    }
+  }
 }
 
 async function down() {

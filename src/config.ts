@@ -8,7 +8,7 @@ export interface Config {
   homeAssistantURL: string;
   longLivedToken: string;
   buttons: Array<ButtonConfig>;
-  verbose: false;
+  verbose: boolean;
 }
 
 export type ObjectWithStringKeys = { [key: string]: any };
@@ -22,6 +22,9 @@ export interface ButtonConfig {
   on: {
     trigger: ObjectWithStringKeys;
     actions: Array<ObjectWithStringKeys> | (() => Array<ObjectWithStringKeys>);
+    // If set, the cycle position resets to the first action when the last press
+    // is older than this many seconds. If unset, the position never resets.
+    resetCountAfterSeconds?: number;
   };
 }
 
@@ -33,25 +36,26 @@ export async function monitorConfig(
   const filePath = join(mainDir, "ha-multi-click.config.ts");
 
   let firstRun = true;
-
-  const handleSighup = () => {
-    console.log("Received SIGHUP signal...");
-
-    loadFn();
-  };
+  let loading = false;
 
   const loadFn = async () => {
-    // By wrapping the loadFn with a "once" we prevent it from being called multiple times before unwatching the file.
-    // After having unwatched the file, we can safely call the onChange function.
-    // And once that is done, we can watch the file again.
+    // A reload can take a long time (teardown, reconnect, waiting for the event
+    // bus); ignore triggers that arrive while one is already in progress.
+    if (loading) {
+      console.log("A (re)load is already in progress; ignoring trigger...");
+
+      return;
+    }
+
+    loading = true;
+
+    unwatchFile(filePath);
+
     if (firstRun) {
       console.log("Loading config file...");
 
       firstRun = false;
     } else {
-      unwatchFile(filePath);
-      process.off("SIGHUP", handleSighup);
-
       console.log("Reloading config file...");
     }
 
@@ -60,19 +64,26 @@ export async function monitorConfig(
 
       await onChange(config);
     } catch (e: any) {
-      console.error("Error loading config file:", e);
+      console.error("Error loading or applying config file:", e);
 
-      await onChange(e);
+      await onChange(e instanceof Error ? e : new Error(String(e)));
+    } finally {
+      loading = false;
+
+      // We do not want to keep and increase the stack; therefore, postpone via the Event Loop.
+      setImmediate(() => {
+        watchFile(filePath, once(loadFn));
+      });
     }
-
-    // We do not want to keep and increase the stack; therefore, postpone via the Event Loop.
-    setImmediate(() => {
-      watchFile(filePath, once(loadFn));
-    });
-
-    // Additionally, we allow restarting via SIGHUP
-    process.once("SIGHUP", handleSighup);
   };
+
+  // The SIGHUP handler stays registered permanently: if the listener count ever
+  // dropped to zero, the default signal disposition (terminate) would apply.
+  process.on("SIGHUP", () => {
+    console.log("Received SIGHUP signal...");
+
+    loadFn();
+  });
 
   // We also want to load the config file initially.
   await loadFn();
@@ -80,9 +91,10 @@ export async function monitorConfig(
 
 async function evalConfig(filePath: string): Promise<Config> {
   const context = createContext({
+    sunIsUp, // Inject helpers as globals (matching `declare global` in config files)
     helpers: {
       sunIsUp,
-    }, // Inject helpers
+    }, // Also keep them available under `helpers` for backwards compatibility
     process: {
       env: process.env,
     }, // Grant access to environment variables

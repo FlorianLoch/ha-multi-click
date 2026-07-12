@@ -96,11 +96,13 @@ function before(h: number, m: number, s: number): boolean {
   const now = new Date();
 
   return (
-    toSeconds(h, m, s) <
-    toSeconds(now.getHours(), now.getMinutes(), now.getSeconds())
+    toSeconds(now.getHours(), now.getMinutes(), now.getSeconds()) <
+    toSeconds(h, m, s)
   );
 }
 
+// If the end time is smaller than the start time, the range is treated as
+// spanning midnight, e.g. between(22, 0, 0, 6, 0, 0).
 function between(
   h1: number,
   m1: number,
@@ -115,18 +117,22 @@ function between(
     now.getMinutes(),
     now.getSeconds(),
   );
+  const start = toSeconds(h1, m1, s1);
+  const end = toSeconds(h2, m2, s2);
 
-  return (
-    toSeconds(h1, m1, s1) <= nowSeconds && nowSeconds < toSeconds(h2, m2, s2)
-  );
+  if (start <= end) {
+    return start <= nowSeconds && nowSeconds < end;
+  }
+
+  return start <= nowSeconds || nowSeconds < end;
 }
 
 function after(h: number, m: number, s: number): boolean {
   const now = new Date();
 
   return (
-    toSeconds(h, m, s) >=
-    toSeconds(now.getHours(), now.getMinutes(), now.getSeconds())
+    toSeconds(now.getHours(), now.getMinutes(), now.getSeconds()) >=
+    toSeconds(h, m, s)
   );
 }
 
