@@ -36,7 +36,7 @@ $(make_dir):
 
 
 $(image_pushed): $(image_built)
-	podman save $(image_tag) | pv | ssh pi5 docker load
+	podman save $(image_tag) | pv | ssh pi5-2 docker load
 	touch $(image_pushed)
 
 
