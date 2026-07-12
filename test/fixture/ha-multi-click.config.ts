@@ -14,15 +14,21 @@ module.exports = {
     {
       name: "test button",
       off: {
-        trigger: {
-          device_id: lookupDeviceId(
-            process.env.OFF_DEVICE_NAME ?? "Test Dimmer",
-          ),
-        },
+        triggers: [
+          {
+            device_id: lookupDeviceId(
+              process.env.OFF_DEVICE_NAME ?? "Test Dimmer",
+            ),
+          },
+        ],
         action: {},
       },
       on: {
-        trigger: { device_id: lookupDeviceId("Renamed Dimmer") },
+        // One subscription per trigger.
+        triggers: [
+          { device_id: lookupDeviceId("Renamed Dimmer") },
+          { device_id: lookupDeviceId("Test Dimmer") },
+        ],
         actions: [{}],
       },
     },

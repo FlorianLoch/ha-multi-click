@@ -63,12 +63,17 @@ test(
 
     runApp();
 
-    // One 'on' and one 'off' trigger subscription with resolved device ids;
-    // "Renamed Dimmer" must match name_by_user of def456, not the decoy
-    // device whose integration name collides.
-    await waitFor(() => mock.subscribedDeviceIds.length === 2);
+    // The 'on' trigger list yields one subscription per entry, plus one for
+    // the single 'off' trigger, all with resolved device ids; "Renamed
+    // Dimmer" must match name_by_user of def456, not the decoy device whose
+    // integration name collides.
+    await waitFor(() => mock.subscribedDeviceIds.length === 3);
 
-    expect(mock.subscribedDeviceIds.toSorted()).toEqual(["abc123", "def456"]);
+    expect(mock.subscribedDeviceIds.toSorted()).toEqual([
+      "abc123",
+      "abc123",
+      "def456",
+    ]);
   },
   TIMEOUT,
 );

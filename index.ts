@@ -3,7 +3,11 @@ import {
   createConnection,
   createLongLivedTokenAuth,
 } from "home-assistant-js-websocket";
-import { type Config, monitorConfig } from "./src/config.ts";
+import {
+  type Config,
+  monitorConfig,
+  type ObjectWithStringKeys,
+} from "./src/config.ts";
 import {
   type DeviceRegistryEntry,
   formatError,
@@ -187,6 +191,27 @@ async function up(cfg: Config): Promise<() => Promise<void>> {
 
     setDeviceRegistry(deviceRegistry);
 
+    // Creates one subscription per trigger, all sharing the same callback.
+    const subscribeTriggers = async (
+      triggers: Array<ObjectWithStringKeys>,
+      callback: () => void,
+    ) => {
+      for (const trigger of triggers) {
+        teardownFns.push(
+          await connection.subscribeMessage(
+            callback,
+            {
+              type: "subscribe_trigger",
+              trigger: {
+                ...trigger,
+              },
+            },
+            { resubscribe: false },
+          ),
+        );
+      }
+    };
+
     const buttons = cfg.buttonsConfigFn();
 
     await Promise.all(
@@ -194,63 +219,40 @@ async function up(cfg: Config): Promise<() => Promise<void>> {
         let count = 0;
         let lastChange = Date.now();
 
-        teardownFns.push(
-          await connection.subscribeMessage(
-            (_) => {
-              cfg.verbose && console.log(`Received 'on' for '${button.name}'`);
+        await subscribeTriggers(button.on.triggers, () => {
+          cfg.verbose && console.log(`Received 'on' for '${button.name}'`);
 
-              const onActions =
-                typeof button.on.actions === "function"
-                  ? button.on.actions()
-                  : button.on.actions;
+          const onActions =
+            typeof button.on.actions === "function"
+              ? button.on.actions()
+              : button.on.actions;
 
-              // Optionally restart the cycle when the last press is too long ago.
-              if (
-                button.on.resetCountAfterSeconds !== undefined &&
-                Date.now() - lastChange >
-                  button.on.resetCountAfterSeconds * 1000
-              ) {
-                count = 0;
-              }
+          // Optionally restart the cycle when the last press is too long ago.
+          if (
+            button.on.resetCountAfterSeconds !== undefined &&
+            Date.now() - lastChange > button.on.resetCountAfterSeconds * 1000
+          ) {
+            count = 0;
+          }
 
-              // We need this safeguard because the length of the actions array might have changed since the
-              // last iteration and count could be out of bounds.
-              const action = onActions[Math.min(count, onActions.length - 1)];
+          // We need this safeguard because the length of the actions array might have changed since the
+          // last iteration and count could be out of bounds.
+          const action = onActions[Math.min(count, onActions.length - 1)];
 
-              count = (count + 1) % onActions.length;
-              lastChange = Date.now();
+          count = (count + 1) % onActions.length;
+          lastChange = Date.now();
 
-              sendAction(action);
-            },
-            {
-              type: "subscribe_trigger",
-              trigger: {
-                ...button.on.trigger,
-              },
-            },
-            { resubscribe: false },
-          ),
-        );
+          sendAction(action);
+        });
 
-        teardownFns.push(
-          await connection!.subscribeMessage(
-            (_) => {
-              cfg.verbose && console.log(`Received 'off' for '${button.name}'`);
+        await subscribeTriggers(button.off.triggers, () => {
+          cfg.verbose && console.log(`Received 'off' for '${button.name}'`);
 
-              count = 0;
-              lastChange = Date.now();
+          count = 0;
+          lastChange = Date.now();
 
-              sendAction(button.off.action);
-            },
-            {
-              type: "subscribe_trigger",
-              trigger: {
-                ...button.off.trigger,
-              },
-            },
-            { resubscribe: false },
-          ),
-        );
+          sendAction(button.off.action);
+        });
       }),
     );
 

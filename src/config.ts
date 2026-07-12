@@ -19,11 +19,13 @@ export type ObjectWithStringKeys = { [key: string]: any };
 export interface ButtonConfig {
   name?: string;
   off: {
-    trigger: ObjectWithStringKeys;
+    // A subscription is created per trigger.
+    triggers: Array<ObjectWithStringKeys>;
     action: ObjectWithStringKeys;
   };
   on: {
-    trigger: ObjectWithStringKeys;
+    // A subscription is created per trigger.
+    triggers: Array<ObjectWithStringKeys>;
     actions: Array<ObjectWithStringKeys> | (() => Array<ObjectWithStringKeys>);
     // If set, the cycle position resets to the first action when the last press
     // is older than this many seconds. If unset, the position never resets.
