@@ -294,7 +294,12 @@ async function up(cfg: Config): Promise<() => Promise<void>> {
 
     stopped = true;
 
-    await runTeardownFns(teardownFns);
+    // Take ownership of the list so a concurrent second invocation (e.g. a
+    // config reload racing with a shutdown) cannot unsubscribe twice.
+    const fns = teardownFns;
+    teardownFns = [];
+
+    await runTeardownFns(fns);
 
     console.log(
       "Called all teardown functions; unsubscribed from all triggers.",
@@ -313,7 +318,18 @@ async function runTeardownFns(teardownFns: Array<() => Promise<void>>) {
   }
 }
 
+// Ctrl+C can deliver more than one signal nearly at once (e.g. `bun run start`
+// forwards a signal to its child while the process group already received
+// SIGINT); tear down only once.
+let shuttingDown = false;
+
 async function down() {
+  if (shuttingDown) {
+    return;
+  }
+
+  shuttingDown = true;
+
   if (teardownFn !== null) {
     await teardownFn();
   }

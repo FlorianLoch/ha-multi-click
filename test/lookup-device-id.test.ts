@@ -79,6 +79,30 @@ test(
 );
 
 test(
+  "tears down exactly once even when receiving multiple shutdown signals",
+  async () => {
+    mock = startMockHA();
+
+    const app = runApp();
+
+    await waitFor(() => mock.subscribedDeviceIds.length === 3);
+
+    // Ctrl+C on `bun run start` delivers a signal to the whole process group
+    // while the wrapper also terminates its child.
+    app.kill("SIGINT");
+    app.kill("SIGTERM");
+
+    const exitCode = await exitCodeOf(app);
+    const output = await outputOf(app);
+
+    expect(exitCode, output).toBe(0);
+    expect(output.split("Shutting down...").length - 1, output).toBe(1);
+    expect(output, output).not.toContain("Error during teardown");
+  },
+  TIMEOUT,
+);
+
+test(
   "lookupDeviceId called at config-eval time fails the load with a clear error",
   async () => {
     mock = startMockHA();
